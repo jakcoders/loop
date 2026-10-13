@@ -28,11 +28,36 @@ export default function LoopApp({ me }: { me: Me }) {
   const [activeScope, setActiveScope] = useState<Scope | null>(null);
   const [jumpTo, setJumpTo] = useState<string | null>(null);
   const [modal, setModal] = useState<
-    null | "createWs" | "joinWs" | "createChannel" | "search" | "groupDm"
+    null | "createWs" | "joinWs" | "createChannel" | "search" | "groupDm" | "settings"
   >(null);
   const [copied, setCopied] = useState(false);
+  const [theme, setTheme] = useState<"system" | "dark" | "light">("system");
 
   const activeWs = workspaces?.find((w) => w.id === activeWsId) ?? null;
+
+  // ---- theme sync ----
+  useEffect(() => {
+    fetch("/api/settings")
+      .then((r) => r.json())
+      .then((s) => {
+        setTheme(s.theme ?? "system");
+        applyTheme(s.theme ?? "system");
+      })
+      .catch(() => {});
+  }, []);
+
+  const toggleTheme = async () => {
+    const next = theme === "dark" ? "light" : "dark";
+    setTheme(next);
+    applyTheme(next);
+    try {
+      await fetch("/api/settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ theme }),
+      });
+    } catch {}
+  };
 
   // ---- workspace bootstrap -------------------------------------------------
   const loadWorkspaces = useCallback(async () => {
@@ -382,6 +407,13 @@ export default function LoopApp({ me }: { me: Me }) {
           >
             Exit
           </button>
+          <button
+            onClick={() => setModal("settings")}
+            title="Settings & profile"
+            className="text-[10px] text-[#5B6476] hover:text-[#F5F7FA]"
+          >
+            ⚙️
+          </button>
         </div>
       </div>
 
@@ -396,15 +428,24 @@ export default function LoopApp({ me }: { me: Me }) {
         </div>
 
         <div className="px-3 pt-3">
-          <button
-            onClick={() => setModal("search")}
-            className="flex w-full items-center gap-2 rounded-lg border border-[#2A3040] bg-[#141821] px-3 py-1.5 text-xs text-[#5B6476] transition hover:border-[#6366F1]"
-          >
-            🔍 Search messages…
-            <span className="ml-auto rounded border border-[#2A3040] px-1 text-[9px]">
-              ⌘K
-            </span>
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setModal("search")}
+              className="flex-1 items-center gap-2 rounded-lg border border-[#2A3040] bg-[#141821] px-3 py-1.5 text-xs text-[#5B6476] transition hover:border-[#6366F1]"
+            >
+              🔍 Search messages…
+              <span className="ml-auto rounded border border-[#2A3040] px-1 text-[9px]">
+                ⌘K
+              </span>
+            </button>
+            <button
+              onClick={toggleTheme}
+              title="Toggle dark/light theme"
+              className="rounded-lg border border-[#2A3040] bg-[#141821] px-2.5 py-1.5 text-sm text-[#8A93A6] hover:border-[#6366F1] hover:text-[#F5F7FA]"
+            >
+              {theme === "dark" ? "☀️" : theme === "light" ? "🌙" : "🌓"}
+            </button>
+          </div>
         </div>
 
         <div className="flex-1 overflow-y-auto px-2 py-3">
@@ -554,12 +595,13 @@ export default function LoopApp({ me }: { me: Me }) {
 
       {/* ---- Chat ---- */}
       {activeScope ? (
-        <ChatPane
+         <ChatPane
           key={`${activeScope.kind}-${activeScope.id}-${jumpTo ?? ""}`}
           me={me}
           scope={activeScope}
           jumpToMessageId={jumpTo}
           onRead={() => clearUnread(activeScope)}
+          members={members}
         />
       ) : (
         <div className="flex flex-1 items-center justify-center text-sm text-[#5B6476]">
@@ -608,6 +650,9 @@ export default function LoopApp({ me }: { me: Me }) {
             openConversation(conv);
           }}
         />
+      )}
+      {modal === "settings" && (
+        <SettingsModal me={me} theme={theme} setTheme={setTheme} onClose={() => setModal(null)} />
       )}
       </div>
     </div>
@@ -957,5 +1002,226 @@ function SearchModal({
         ))}
       </div>
     </ModalShell>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Theme helper
+// ---------------------------------------------------------------------------
+
+function applyTheme(theme: "system" | "dark" | "light") {
+  const root = document.documentElement;
+  root.classList.remove("light-theme", "dark-theme");
+  if (theme === "system") {
+    if (window.matchMedia("(prefers-color-scheme: dark)").matches) {
+      root.classList.add("dark-theme");
+    } else {
+      root.classList.add("light-theme");
+    }
+  } else {
+    root.classList.add(`${theme}-theme`);
+  }
+}
+
+function SettingsModal({
+  me,
+  theme,
+  setTheme,
+  onClose,
+}: {
+  me: Me;
+  theme: "system" | "dark" | "light";
+  setTheme: (t: "system" | "dark" | "light") => void;
+  onClose: () => void;
+}) {
+  const [tab, setTab] = useState<"general" | "notifications" | "profile">("general");
+  const [statusText, setStatusText] = useState(me.statusText ?? "");
+  const [saved, setSaved] = useState(false);
+
+  async function saveProfile() {
+    await fetch("/api/settings", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ statusText }),
+    });
+    setSaved(true);
+    setTimeout(() => setSaved(false), 1500);
+  }
+
+  return (
+    <ModalShell title="Settings" onClose={onClose} wide>
+      <div className="flex gap-4">
+        <div className="flex flex-col gap-1 pr-3">
+          <button
+            onClick={() => setTab("general")}
+            className={`text-left text-sm ${tab === "general" ? "text-[#6366F1]" : "text-[#8A93A6]"}`}
+          >
+            General
+          </button>
+          <button
+            onClick={() => setTab("notifications")}
+            className={`text-left text-sm ${tab === "notifications" ? "text-[#6366F1]" : "text-[#8A93A6]"}`}
+          >
+            Notifications
+          </button>
+          <button
+            onClick={() => setTab("profile")}
+            className={`text-left text-sm ${tab === "profile" ? "text-[#6366F1]" : "text-[#8A93A6]"}`}
+          >
+            Profile
+          </button>
+        </div>
+        <div className="flex-1">
+          {tab === "general" && (
+            <div className="space-y-3">
+              <h4 className="text-xs font-semibold text-[#5B6476]">
+                Appearance
+              </h4>
+              <div className="flex gap-2">
+                {(["system", "dark", "light"] as const).map((t) => (
+                  <button
+                    key={t}
+                    onClick={async () => {
+                      setTheme(t);
+                      applyTheme(t);
+                      await fetch("/api/settings", {
+                        method: "PATCH",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ theme: t }),
+                      });
+                    }}
+                    className={`rounded-lg border px-3 py-1.5 text-sm capitalize ${
+                      theme === t
+                        ? "border-[#6366F1] bg-[#6366F1]/10 text-[#C7CEDD]"
+                        : "border-[#2A3040] bg-[#141821] text-[#8A93A6] hover:border-[#6366F1]"
+                    }`}
+                  >
+                    {t}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+          {tab === "notifications" && <NotificationPrefs />}
+          {tab === "profile" && (
+            <div className="space-y-3">
+              <h4 className="text-xs font-semibold text-[#5B6476]">
+                Status
+              </h4>
+              <input
+                value={statusText}
+                onChange={(e) => setStatusText(e.target.value)}
+                placeholder="e.g. In a meeting — back at 3pm"
+                className={modalInput}
+              />
+              {saved && <p className="text-xs text-[#22C55E]">Saved</p>}
+              <button
+                onClick={saveProfile}
+                className="rounded-lg bg-[#6366F1] px-3 py-1.5 text-sm font-semibold hover:bg-[#5558E6]"
+              >
+                Save profile
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+    </ModalShell>
+  );
+}
+
+function NotificationPrefs() {
+  const [prefs, setPrefs] = useState({
+    notifyDm: true,
+    notifyMention: true,
+    notifyAllThreads: false,
+    pushAllThreads: false,
+  });
+  const [loading, setLoading] = useState(true);
+  const [saved, setSaved] = useState(false);
+
+  useEffect(() => {
+    fetch("/api/settings")
+      .then((r) => r.json())
+      .then((s) => {
+        setPrefs({
+          notifyDm: s.notifyDm ?? true,
+          notifyMention: s.notifyMention ?? true,
+          notifyAllThreads: s.notifyAllThreads ?? false,
+          pushAllThreads: s.pushAllThreads ?? false,
+        });
+        setLoading(false);
+      });
+  }, []);
+
+  async function save() {
+    await fetch("/api/settings", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(prefs),
+    });
+    setSaved(true);
+    setTimeout(() => setSaved(false), 1500);
+  }
+
+  if (loading) return <p className="text-xs text-[#5B6476]">Loading…</p>;
+
+  return (
+    <div className="space-y-3">
+      <ToggleRow
+        label="Direct messages"
+        checked={prefs.notifyDm}
+        onChange={(v) => setPrefs((p) => ({ ...p, notifyDm: v }))}
+      />
+      <ToggleRow
+        label="Mentions"
+        checked={prefs.notifyMention}
+        onChange={(v) => setPrefs((p) => ({ ...p, notifyMention: v }))}
+      />
+      <ToggleRow
+        label="All new threads (not just @mentions)"
+        checked={prefs.notifyAllThreads}
+        onChange={(v) => setPrefs((p) => ({ ...p, notifyAllThreads: v }))}
+      />
+      <ToggleRow
+        label="Push to mobile for all threads"
+        checked={prefs.pushAllThreads}
+        onChange={(v) => setPrefs((p) => ({ ...p, pushAllThreads: v }))}
+      />
+      <button
+        onClick={save}
+        className="rounded-lg bg-[#6366F1] px-3 py-1.5 text-sm font-semibold hover:bg-[#5558E6]"
+      >
+        Save notification settings
+      </button>
+      {saved && <p className="text-xs text-[#22C55E]">Saved</p>}
+    </div>
+  );
+}
+
+function ToggleRow({
+  label,
+  checked,
+  onChange,
+}: {
+  label: string;
+  checked: boolean;
+  onChange: (v: boolean) => void;
+}) {
+  return (
+    <label className="flex items-center justify-between gap-2 text-sm">
+      <span className="text-[#C7CEDD]">{label}</span>
+      <button
+        onClick={() => onChange(!checked)}
+        className={`relative h-5 w-9 rounded-full transition ${
+          checked ? "bg-[#6366F1]" : "bg-[#3A4356]"
+        }`}
+      >
+        <span
+          className={`absolute top-0.5 h-4 w-4 rounded-full bg-white transition ${
+            checked ? "left-5" : "left-0.5"
+          }`}
+        />
+      </button>
+    </label>
   );
 }

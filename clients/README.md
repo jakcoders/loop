@@ -22,10 +22,21 @@ this repository. Compile them in their proper toolchains.
 ## Endpoints
 
 ```
-POST   /api/auth/register | login | logout        GET /api/auth/me
+POST   /api/auth/register | login | logout        GET /api/auth/me (returns `user.statusText`, `timezone` + `settings`)
 GET    /api/workspaces                            POST /api/workspaces
-POST   /api/workspaces/join                       GET  /api/workspaces/{id}/members
-GET+POST /api/workspaces/{id}/channels            GET+POST /api/workspaces/{id}/conversations
+POST   /api/workspaces/join                       GET  /api/workspaces/{id}/members (includes `statusText`)
+GET+POST /api/workspaces/{id}/channels            GET+POST /api/workspaces/{id}/conversations (includes `statusText` on others)
+PATCH  /api/channels/{id}                         (admin/owner: name, topic, purpose, isArchived)
+POST   /api/channels/{id}/star                    (toggle starred — affects sidebar ordering)
+GET+POST /api/workspaces/{id}/pins               (list all pins in workspace; POST messageId to pin)
+POST   /api/saved                                (toggle save a message)
+GET    /api/saved                                (list all saved messages for the user)
+GET    /api/settings                             (theme, notification prefs, custom emoji)
+PATCH  /api/settings                             (update theme, notifyDm/Mention/AllThreads, pushAllThreads, statusText)
+GET    /api/custom-emojis?workspaceId=…          (custom emoji set for workspace)
+POST   /api/custom-emojis                        (add custom emoji: {workspaceId, name, code})
+GET    /api/commands                             (slash command registry)
+GET    /api/workspaces/{id}/users?q=…            (mention autocomplete)
 GET    /api/workspaces/{id}/search?q=
 GET+POST /api/{channels|conversations}/{id}/messages   (?cursor | ?after | ?parentId)
 POST   /api/{channels|conversations}/{id}/read

@@ -70,6 +70,8 @@ export type AuthUser = {
   name: string;
   email: string;
   avatarColor: string;
+  statusText?: string | null;
+  timezone: string;
 };
 
 /**
@@ -89,6 +91,8 @@ export async function getCurrentUser(options?: {
       name: users.name,
       email: users.email,
       avatarColor: users.avatarColor,
+      statusText: users.statusText,
+      timezone: users.timezone,
     })
     .from(sessions)
     .innerJoin(users, eq(users.id, sessions.userId))

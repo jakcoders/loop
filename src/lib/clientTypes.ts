@@ -3,6 +3,16 @@ export type Me = {
   name: string;
   email: string;
   avatarColor: string;
+  statusText?: string | null;
+  timezone: string;
+};
+
+export type UserSettings = {
+  theme: "system" | "dark" | "light";
+  notifyDm: boolean;
+  notifyMention: boolean;
+  notifyAllThreads: boolean;
+  pushAllThreads: boolean;
 };
 
 export type Workspace = {
@@ -17,9 +27,12 @@ export type Channel = {
   id: string;
   name: string;
   topic: string | null;
+  purpose?: string | null;
   isPrivate: boolean;
+  isArchived?: boolean;
   isMember: boolean;
   muted: boolean;
+  starred?: boolean;
   unreadCount: number;
 };
 
@@ -27,6 +40,7 @@ export type Member = {
   id: string;
   name: string;
   avatarColor: string;
+  statusText?: string | null;
   lastSeenAt: string;
   role: string;
 };

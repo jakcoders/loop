@@ -7,10 +7,17 @@ import {
   useRef,
   useState,
 } from "react";
-import { AttachmentDto, Me, Msg, Scope, fmtBytes, initials } from "@/lib/clientTypes";
+import { AttachmentDto, Member, Me, Msg, Scope, fmtBytes, initials } from "@/lib/clientTypes";
 import { outboxAdd, outboxRemove } from "@/lib/outbox";
 
 const EMOJI_SET = ["👍", "✅", "🎉", "❤️", "😂", "🚀", "👀", "🙏"];
+
+const FORMAT_SHORTCUTS: { label: string; markup: (sel: string) => string; placeholder: string }[] = [
+  { label: "B", markup: (s) => `**${s}**`, placeholder: "Bold" },
+  { label: "I", markup: (s) => `*${s}*`, placeholder: "Italic" },
+  { label: "C", markup: (s) => `\`${s}\``, placeholder: "Code" },
+  { label: "L", markup: (s) => `[${s}](url)`, placeholder: "Link" },
+];
 
 function fmtTime(iso: string): string {
   return new Date(iso).toLocaleTimeString([], {
@@ -38,11 +45,13 @@ export default function ChatPane({
   scope,
   jumpToMessageId,
   onRead,
+  members,
 }: {
   me: Me;
   scope: Scope;
   jumpToMessageId?: string | null;
   onRead: () => void;
+  members?: Member[];
 }) {
   const apiBase = `/api/${scope.kind === "channel" ? "channels" : "conversations"}/${scope.id}`;
   const scopeLabel =
@@ -55,6 +64,8 @@ export default function ChatPane({
   const [threadRootId, setThreadRootId] = useState<string | null>(null);
   const [typingUsers, setTypingUsers] = useState<string[]>([]);
   const [muted, setMuted] = useState(scope.muted);
+  const [emojiList, setEmojiList] = useState<string[]>(EMOJI_SET);
+  const [pinnedMap, setPinnedMap] = useState<Record<string, boolean>>({});
 
   const toggleMute = useCallback(async () => {
     const res = await fetch(
@@ -66,6 +77,33 @@ export default function ChatPane({
       setMuted(data.muted);
     }
   }, [scope.kind, scope.id]);
+
+  const fetchEmoji = useCallback(async () => {
+    try {
+      const wsId = scope.kind === "channel" ? scope.id : scope.id;
+      const res = await fetch(`/api/custom-emojis?workspaceId=${encodeURIComponent(wsId)}`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.items?.length > 0) {
+          setEmojiList([...EMOJI_SET, ...data.items.map((e: { code: string }) => e.code)]);
+        }
+      }
+    } catch {}
+  }, [scope.id]);
+
+  const togglePin = useCallback(async (msgId: string) => {
+    try {
+      const res = await fetch(`/api/messages/${encodeURIComponent(msgId)}/pin`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ workspaceId: scope.id }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setPinnedMap((p) => ({ ...p, [msgId]: data.pinned }));
+      }
+    } catch {}
+  }, [scope.id]);
 
   const watermark = useRef<string>(new Date().toISOString());
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -104,6 +142,7 @@ export default function ChatPane({
       setNextCursor(data.nextCursor);
       setInitialLoaded(true);
       markRead();
+      fetchEmoji();
     })();
     return () => {
       cancelled = true;
@@ -514,6 +553,9 @@ export default function ChatPane({
                     onDelete={deleteMessage}
                     onRetry={retryMessage}
                     onOpenThread={openThread}
+                    onPin={togglePin}
+                    isPinned={pinnedMap[m.id]}
+                    emojiPicker={emojiList}
                   />
                 </div>
               );
@@ -537,6 +579,7 @@ export default function ChatPane({
           onSend={(body, atts) => sendMessage(body, null, atts)}
           onTyping={sendTyping}
           allowAttachments
+          members={members}
         />
       </div>
 
@@ -566,6 +609,9 @@ export default function ChatPane({
               onDelete={deleteMessage}
               onRetry={retryMessage}
               onOpenThread={() => {}}
+              onPin={togglePin}
+              isPinned={pinnedMap[threadRoot.id]}
+              emojiPicker={emojiList}
             />
             {threadReplies.length > 0 && (
               <div className="my-2 flex items-center gap-2">
@@ -586,26 +632,30 @@ export default function ChatPane({
                   new Date(prev.createdAt).getTime() <
                   5 * 60_000;
               return (
-                <MessageRow
-                  key={m.id}
-                  msg={m}
-                  me={me}
-                  grouped={!!grouped}
-                  showThreadAction={false}
-                  onReact={toggleReaction}
-                  onEdit={editMessage}
-                  onDelete={deleteMessage}
-                  onRetry={retryMessage}
-                  onOpenThread={() => {}}
-                />
+                  <MessageRow
+                    key={m.id}
+                    msg={m}
+                    me={me}
+                    grouped={!!grouped}
+                    showThreadAction
+                    onReact={toggleReaction}
+                    onEdit={editMessage}
+                    onDelete={deleteMessage}
+                    onRetry={retryMessage}
+                    onOpenThread={openThread}
+                    onPin={togglePin}
+                    isPinned={pinnedMap[m.id]}
+                    emojiPicker={emojiList}
+                  />
               );
             })}
           </div>
-          <Composer
-            placeholder="Reply in thread…"
-            onSend={(body, atts) => sendMessage(body, threadRoot.id, atts)}
-            onTyping={sendTyping}
-          />
+            <Composer
+              placeholder="Reply in thread…"
+              onSend={(body, atts) => sendMessage(body, threadRoot.id, atts)}
+              onTyping={sendTyping}
+              members={members}
+            />
         </div>
       )}
     </div>
@@ -626,6 +676,9 @@ function MessageRow({
   onDelete,
   onRetry,
   onOpenThread,
+  onPin,
+  isPinned,
+  emojiPicker,
 }: {
   msg: Msg;
   me: Me;
@@ -636,6 +689,9 @@ function MessageRow({
   onDelete: (id: string) => void;
   onRetry: (m: Msg) => void;
   onOpenThread: (id: string) => void;
+  onPin: (id: string) => void;
+  isPinned?: boolean;
+  emojiPicker?: string[];
 }) {
   const [pickerOpen, setPickerOpen] = useState(false);
   const [editing, setEditing] = useState(false);
@@ -821,6 +877,15 @@ function MessageRow({
           >
             😊
           </button>
+          <button
+            onClick={() => onPin(msg.id)}
+            title={isPinned ? "Unpin message" : "Pin message"}
+            className={`rounded px-1.5 py-0.5 text-sm hover:bg-[#232B3D] ${
+              isPinned ? "text-[#6366F1]" : "text-[#8A93A6]"
+            }`}
+          >
+            📌
+          </button>
           {showThreadAction && (
             <button
               onClick={() => onOpenThread(msg.id)}
@@ -859,7 +924,7 @@ function MessageRow({
           className="absolute top-6 right-2 z-20 flex gap-1 rounded-xl border border-[#2A3040] bg-[#141821] p-2 shadow-2xl"
           onMouseLeave={() => setPickerOpen(false)}
         >
-          {EMOJI_SET.map((e) => (
+          {emojiPicker?.map((e) => (
             <button
               key={e}
               onClick={() => {
@@ -886,17 +951,67 @@ function Composer({
   onSend,
   onTyping,
   allowAttachments,
+  members,
 }: {
   placeholder: string;
   onSend: (body: string, attachments: AttachmentDto[]) => void;
   onTyping: () => void;
   allowAttachments?: boolean;
+  members?: Member[];
 }) {
   const [value, setValue] = useState("");
   const [staged, setStaged] = useState<AttachmentDto[]>([]);
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
+  const [mentionQuery, setMentionQuery] = useState<string | null>(null);
+  const [mentionStart, setMentionStart] = useState(0);
+
+  function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      if (!mentionQuery) submit();
+    }
+  }
+
+  function handleChange(e: React.ChangeEvent<HTMLTextAreaElement>) {
+    const v = e.target.value;
+    setValue(v);
+    if (v.trim()) onTyping();
+
+    // Detect mention trigger
+    const cursor = e.target.selectionStart ?? 0;
+    const before = v.slice(0, cursor);
+    const match = before.match(/@([a-zA-Z0-9_.-]*)$/);
+    if (match) {
+      setMentionQuery(match[1]);
+      setMentionStart(cursor - match[1].length - 1);
+    } else {
+      if (mentionQuery !== null) setMentionQuery(null);
+    }
+  }
+
+  function insertMention(name: string) {
+    const before = value.slice(0, mentionStart);
+    const after = value.slice(mentionStart + ("@" + (mentionQuery ?? "")).length);
+    setValue(before + "@" + name + " " + after);
+    setMentionQuery(null);
+    setTimeout(() => {
+      const el = document.activeElement as HTMLTextAreaElement;
+      if (el) el.focus();
+    }, 0);
+  }
+
+  function insertFormat(markup: (sel: string) => string) {
+    const el = document.activeElement as HTMLTextAreaElement;
+    const start = el?.selectionStart ?? 0;
+    const end = el?.selectionEnd ?? 0;
+    const sel = value.slice(start, end) || "text";
+    const result = markup(sel);
+    const next = value.slice(0, start) + result + value.slice(end);
+    setValue(next);
+    onTyping();
+  }
 
   function submit() {
     const body = value.trim();
@@ -905,6 +1020,7 @@ function Composer({
     setValue("");
     setStaged([]);
     setUploadError(null);
+    setMentionQuery(null);
   }
 
   async function uploadFiles(files: FileList | null) {
@@ -929,6 +1045,12 @@ function Composer({
     setUploading(false);
     if (fileInput.current) fileInput.current.value = "";
   }
+
+  const mentionMatches = mentionQuery
+    ? members?.filter((m) =>
+        m.name.toLowerCase().includes(mentionQuery.toLowerCase())
+      )
+    : [];
 
   return (
     <div className="border-t border-[#1E2432] p-3">
@@ -957,7 +1079,22 @@ function Composer({
       {uploadError && (
         <p className="mb-2 text-xs text-[#EF4444]">{uploadError}</p>
       )}
+
       <div className="flex items-end gap-2 rounded-xl border border-[#2A3040] bg-[#141821] p-2 transition focus-within:border-[#6366F1]">
+        {/* formatting toolbar */}
+        <div className="flex items-center gap-0.5 border-r border-[#1E2432] pr-1.5">
+          {FORMAT_SHORTCUTS.map((f) => (
+            <button
+              key={f.label}
+              onClick={() => insertFormat(f.markup)}
+              title={f.placeholder}
+              className="rounded px-1.5 py-1 text-xs font-bold text-[#8A93A6] hover:bg-[#232B3D] hover:text-[#F5F7FA]"
+            >
+              {f.label}
+            </button>
+          ))}
+        </div>
+
         {allowAttachments && (
           <>
             <input
@@ -979,16 +1116,8 @@ function Composer({
         )}
         <textarea
           value={value}
-          onChange={(e) => {
-            setValue(e.target.value);
-            if (e.target.value.trim()) onTyping();
-          }}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey) {
-              e.preventDefault();
-              submit();
-            }
-          }}
+          onChange={handleChange}
+          onKeyDown={handleKeyDown}
           placeholder={placeholder}
           rows={Math.min(value.split("\n").length, 5)}
           className="flex-1 resize-none bg-transparent px-2 py-1.5 text-sm placeholder-[#5B6476] outline-none"
@@ -1002,8 +1131,34 @@ function Composer({
           ➤
         </button>
       </div>
+
+      {/* mention autocomplete */}
+      {mentionQuery !== null && (
+        <div className="mt-1 max-h-40 overflow-y-auto rounded-lg border border-[#2A3040] bg-[#141821]">
+          {mentionMatches?.length === 0 && (
+            <p className="px-2 py-1.5 text-xs text-[#5B6476]">No matches</p>
+          )}
+          {mentionMatches?.map((m) => (
+            <button
+              key={m.id}
+              onClick={() => insertMention(m.name)}
+              className="flex w-full items-center gap-2 px-2 py-1.5 text-left text-sm hover:bg-[#1A202E]"
+            >
+              <span
+                className="flex h-5 w-5 items-center justify-center rounded-full text-[9px] font-bold text-white"
+                style={{ backgroundColor: m.avatarColor }}
+              >
+                {initials(m.name)}
+              </span>
+              <span className="truncate">{m.name}</span>
+              {m.role === "OWNER" && <span className="ml-auto text-[9px] text-[#5B6476]">OWNER</span>}
+            </button>
+          ))}
+        </div>
+      )}
+
       <p className="mt-1 px-1 text-[10px] text-[#5B6476]">
-        Enter to send · Shift+Enter for a new line
+        Enter to send · Shift+Enter for a new line · @ to mention
       </p>
     </div>
   );

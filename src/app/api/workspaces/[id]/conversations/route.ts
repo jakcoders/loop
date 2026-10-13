@@ -53,6 +53,7 @@ export async function GET(
         userId: users.id,
         name: users.name,
         avatarColor: users.avatarColor,
+        statusText: users.statusText,
         lastSeenAt: users.lastSeenAt,
       })
       .from(conversationMembers)
@@ -91,6 +92,7 @@ export async function GET(
         id: m.userId,
         name: m.name,
         avatarColor: m.avatarColor,
+        statusText: m.statusText,
         lastSeenAt: m.lastSeenAt.toISOString(),
       }));
     return {

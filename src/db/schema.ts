@@ -28,6 +28,9 @@ export const users = pgTable(
     email: text("email").notNull(),
     passwordHash: text("password_hash").notNull(),
     avatarColor: text("avatar_color").notNull().default("#6366F1"),
+    statusText: text("status_text"),
+    statusExpiresAt: timestamp("status_expires_at", { withTimezone: true }),
+    timezone: text("timezone").notNull().default("UTC"),
     // Presence is derived from heartbeat expiry, never a permanent flag.
     lastSeenAt: timestamp("last_seen_at", { withTimezone: true })
       .notNull()
@@ -115,7 +118,9 @@ export const channels = pgTable(
       .references(() => workspaces.id, { onDelete: "cascade" }),
     name: text("name").notNull(),
     topic: text("topic"),
+    purpose: text("purpose"), // Slack-style channel purpose
     isPrivate: boolean("is_private").notNull().default(false),
+    isArchived: boolean("is_archived").notNull().default(false),
     createdById: text("created_by_id")
       .notNull()
       .references(() => users.id, { onDelete: "restrict" }),
@@ -137,8 +142,9 @@ export const channelMembers = pgTable(
       .references(() => users.id, { onDelete: "cascade" }),
     channelId: text("channel_id")
       .notNull()
-      .references(() => channels.id, { onDelete: "cascade" }),
+       .references(() => channels.id, { onDelete: "cascade" }),
     muted: boolean("muted").notNull().default(false), // notification preference
+    starredAt: timestamp("starred_at", { withTimezone: true }), // per-user star
     lastReadAt: timestamp("last_read_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -199,6 +205,98 @@ export const conversationMembers = pgTable(
   (t) => [
     primaryKey({ columns: [t.userId, t.conversationId] }),
     index("conversation_members_conv_idx").on(t.conversationId, t.userId),
+  ]
+);
+
+// ---------------------------------------------------------------------------
+// User preferences
+// ---------------------------------------------------------------------------
+export const userSettings = pgTable(
+  "user_settings",
+  {
+    userId: text("user_id")
+      .primaryKey()
+      .references(() => users.id, { onDelete: "cascade" }),
+    theme: text("theme").notNull().default("system"), // system | dark | light
+    notifyDm: boolean("notify_dm").notNull().default(true),
+    notifyMention: boolean("notify_mention").notNull().default(true),
+    notifyAllThreads: boolean("notify_all_threads").notNull().default(false),
+    pushAllThreads: boolean("push_all_threads").notNull().default(false),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [index("user_settings_user_idx").on(t.userId)]
+);
+
+export const pins = pgTable(
+  "pins",
+  {
+    id: text("id").primaryKey(),
+    messageId: text("message_id")
+      .notNull()
+      .references(() => messages.id, { onDelete: "cascade" }),
+    channelId: text("channel_id").references(() => channels.id, {
+      onDelete: "cascade",
+    }),
+    conversationId: text("conversation_id").references(
+      () => conversations.id,
+      { onDelete: "cascade" }
+    ),
+    pinnedById: text("pinned_by_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("pins_message_unique").on(t.messageId),
+    index("pins_channel_idx").on(t.channelId),
+    index("pins_conv_idx").on(t.conversationId),
+  ]
+);
+
+export const savedMessages = pgTable(
+  "saved_messages",
+  {
+    id: text("id").primaryKey(),
+    messageId: text("message_id")
+      .notNull()
+      .references(() => messages.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("saved_messages_message_unique").on(t.messageId),
+    index("saved_messages_user_idx").on(t.userId),
+  ]
+);
+
+// Slack-style custom emoji — store as unicode/code for simplicity (no image upload).
+export const customEmojis = pgTable(
+  "custom_emojis",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    code: text("code").notNull(), // raw emoji or unicode sequence
+    uploadedById: text("uploaded_by_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "restrict" }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("custom_emojis_workspace_name_unique").on(t.workspaceId, t.name),
+    index("custom_emojis_workspace_idx").on(t.workspaceId),
   ]
 );
 

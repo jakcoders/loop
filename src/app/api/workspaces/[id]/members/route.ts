@@ -22,6 +22,7 @@ export async function GET(
       id: users.id,
       name: users.name,
       avatarColor: users.avatarColor,
+      statusText: users.statusText,
       lastSeenAt: users.lastSeenAt,
       role: memberships.role,
     })

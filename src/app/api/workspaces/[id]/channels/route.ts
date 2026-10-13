@@ -72,9 +72,12 @@ export async function GET(
       id: c.id,
       name: c.name,
       topic: c.topic,
+      purpose: c.purpose,
       isPrivate: c.isPrivate,
+      isArchived: c.isArchived,
       isMember: memberMap.has(c.id),
       muted: memberMap.get(c.id)?.muted ?? false,
+      starred: memberMap.get(c.id)?.starredAt != null,
       unreadCount: unreadMap.get(c.id) ?? 0,
     }));
 
